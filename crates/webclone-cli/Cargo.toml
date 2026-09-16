@@ -1,0 +1,16 @@
+[package]
+name = "webclone-cli"
+description = "webclone — 网页模板 / 整站克隆命令行工具"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "webclone"
+path = "src/main.rs"
+
+[dependencies]
+webclone-core.workspace = true
+url.workspace = true

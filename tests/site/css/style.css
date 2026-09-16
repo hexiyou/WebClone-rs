@@ -1,0 +1,12 @@
+/* 主样式表 */
+@charset "utf-8";
+body {
+  background: #fff url(../img/bg.jpg) repeat-x;
+  font-family: 'TestFont', sans-serif;
+}
+.icon {
+  background-image: url('../img/icon.png?v=2');
+}
+.hero {
+  background: url(https://cdn.example.net/assets/hero.webp) center/cover;
+}

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+
+  <assemblyIdentity type="win32" name="WebClone.GUI" version="1.0.0.0"
+                    processorArchitecture="*"/>
+  <description>WebClone 网页克隆工具</description>
+
+  <!-- 关键的一条。
+       声明对 comctl32 v6 的依赖后，SxS 会把进程里的 comctl32.dll 解析到 v6 版本，
+       所有原生控件（Button / CheckBox / Edit / ProgressBar / Tab / ScrollBar）
+       随即切换到现代视觉样式渲染。
+       缺了这一段，控件会走经典渲染路径 —— 灰色 3D 凸起方块，也就是"上古观感"的
+       唯一根源。C# WPF 不需要这条，因为 WPF 的控件全是自绘的。 -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32"
+                        name="Microsoft.Windows.Common-Controls"
+                        version="6.0.0.0"
+                        processorArchitecture="*"
+                        publicKeyToken="6595b64144ccf1df"
+                        language="*"/>
+    </dependentAssembly>
+  </dependency>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <!-- 声明支持的系统版本。缺这一段时 Windows 会以兼容模式对待进程，
+       GetVersionEx 之类的 API 会谎报版本，个别控件与通用文件对话框
+       会退回旧版外观。 -->
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/> <!-- Windows 7   -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/> <!-- Windows 8   -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/> <!-- Windows 8.1 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/> <!-- Windows 10/11 -->
+    </application>
+  </compatibility>
+
+  <!-- 刻意不声明 dpiAware / dpiAwareness。
+       winsafe 的 initial_gui_setup() 会调用 SetProcessDPIAware()，而该 API 在
+       "DPI 感知已由 manifest 指定"时会失败并返回 ERROR_ACCESS_DENIED —— winsafe
+       对它用的是 .expect(DONTFAIL)，结果是进程直接 panic。
+       所以 DPI 感知交给 winsafe 的运行时调用（system-DPI aware），manifest 不插手。 -->
+
+</assembly>

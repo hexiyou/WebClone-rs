@@ -1,0 +1,25 @@
+[package]
+name = "webclone-gui"
+description = "WebClone 网页克隆工具图形界面（Rust + winsafe）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "WebClone-GUI"
+path = "src/main.rs"
+
+[dependencies]
+webclone-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+url.workspace = true
+
+[dependencies.winsafe]
+version = "0.0.29"
+# shell 用来调 IFileOpenDialog（"浏览..."的文件夹选择框）。
+# gui 特性本身已经带出 comctl / uxtheme / ole / user。
+features = ["gui", "shell"]

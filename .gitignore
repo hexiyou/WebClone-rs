@@ -1,0 +1,20 @@
+# Cargo 构建输出
+/target/
+
+# 发布产物目录（二进制可复现，不入库；需要纳管时用 git add -f）
+/dist/
+
+# 冒烟测试留下的临时文件
+gui-smoke.log
+shot-*.png
+tests/.smoke-sandbox/
+tests/_regress/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 某个外部工具没展开环境变量，把 Windows 兼容性数据库（cversions.2.db 等）
+# 写成了字面量目录 `%SystemDrive%/ProgramData/...`，曾落在 crates/ 里。
+# 这不是源码，防它再冒出来。
+**/%SystemDrive%/

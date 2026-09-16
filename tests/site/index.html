@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>克隆工具测试首页</title>
+<link rel="stylesheet" href="css/style.css?v=1.2&theme=dark">
+<link rel="stylesheet" href="css/extra.css">
+<link rel="icon" href="img/favicon.ico">
+<link rel="canonical" href="http://localhost:8765/">
+<script src="js/app.js?ver=3"></script>
+<style>
+  .inline-bg { background-image: url("img/css-bg.png?size=large"); }
+  @import "css/imported.css";
+  @font-face {
+    font-family: 'TestFont';
+    src: url('../font/test.woff2') format('woff2');
+  }
+</style>
+</head>
+<body background="img/body-bg.png">
+  <h1>测试首页</h1>
+  <img src="img/logo.png" alt="logo">
+  <img srcset="img/a.png 1x, img/b.png?x=1 2x" alt="srcset">
+  <div style="background: url(img/inline-style.png) no-repeat; width: 10px; height: 10px;"></div>
+  <video poster="img/poster.png"><source src="media/clip.mp4" type="video/mp4"></video>
+  <a href="sub/page2.html">下级页面</a>
+  <a href="https://external.example.com/somewhere">外站链接</a>
+  <a href="mailto:someone@example.com">邮件链接</a>
+  <a href="#anchor">页内锚点</a>
+</body>
+</html>

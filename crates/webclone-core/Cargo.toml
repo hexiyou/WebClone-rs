@@ -1,0 +1,33 @@
+[package]
+name = "webclone-core"
+description = "网页克隆核心引擎（Rust 移植版）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+encoding_rs.workspace = true
+url.workspace = true
+chrono.workspace = true
+percent-encoding.workspace = true
+regex.workspace = true
+
+# 关闭默认特性：default 里带了 system-proxy，会自动读取系统/环境变量里的代理，
+# 与"未配置代理即直连"的语义冲突（本机环境恰好设了 http_proxy）。
+[dependencies.reqwest]
+version = "0.13"
+default-features = false
+features = [
+    "blocking",
+    "native-tls",
+    "http2",
+    "gzip",
+    "brotli",
+    "deflate",
+    "socks",
+]

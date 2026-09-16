@@ -1,0 +1,16 @@
+# 默认按文本处理，仓库内统一 LF。
+# Windows 上如果开了 autocrlf，shell 脚本会被塞进 CRLF，
+# 拿到 Linux/Cygwin 上跑就会报 `bad interpreter: /usr/bin/env bash^M`。
+* text=auto eol=lf
+
+# 二进制文件别做换行转换
+*.exe  binary
+*.dll  binary
+*.png  binary
+*.jpg  binary
+*.webp binary
+*.ico  binary
+
+# Windows 侧脚本保留 CRLF 更省事（PowerShell 对 LF 也能跑，但记事本看着难受）
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
