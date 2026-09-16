@@ -35,7 +35,8 @@ webclone-rs/
     ├── gui_probe.py            GUI 界面探针（59 条断言 = 50 首跑 + 9 配置恢复，含截图）
     ├── gui_smoke.sh            GUI 冒烟入口（起进程、跑探针、收尾；自动沙箱隔离）
     ├── pe_resource.py          PE 资源区 / .ico 解析器（零依赖，给 check_icon 用）
-    └── check_icon.py           校验 exe 里的图标与 assets/app.ico 逐字节一致
+    ├── check_icon.py           校验 exe 里的图标与 assets/app.ico 逐字节一致
+    └── check_winver.py         校验产物实际需要的最低 Windows 版本（PE 导入表逐符号比对）
 ```
 
 `webclone-core` 的模块划分刻意与 C# 版 `WebClone.Core` 一一对应，方便对照阅读：
@@ -476,6 +477,60 @@ winsafe 的窗口**连同所有子控件**都是在消息循环启动后才真�
 > "每组恰好一个选中 + 就是配置里那个 + 代理框已启用"。
 > 补测试时先用**未修复的二进制**跑了一遍，确认 9 条断言里有 7 条 FAIL（含克隆模式那组
 > 同样中招）—— 断言真的抓得住，再改代码。
+
+## 系统要求
+
+**官方保证：Windows 10 及以上（x64）。** 这不是项目的取舍，而是 Rust 工具链的硬口径
+—— 自 **Rust 1.78**（2024-05）起，`x86_64-pc-windows-msvc` 的最低支持平台提升到
+Windows 10，官方明确说明该要求「既适用于 Rust 工具链本身，也适用于 Rust 生成的二进制
+文件」。本项目由 rustc 1.97.1 构建。Rust 另开了 `x86_64-win7-windows-msvc` 骨架留给
+Win7，但它只是 **Tier 3**（不官方构建、不测试），要用得自己 `-Z build-std` 编 std。
+
+### Win10 以下具体卡在哪
+
+值得一提的是，**PE 头写的是子系统版本 6.0（Vista）** —— Windows 加载器只校验这一个
+字段，所以它不会以「版本太低」为由拒绝加载。真正的门槛全在**导入表**：
+
+| 导入符号 | 最低系统 | 来源 |
+|---|---|---|
+| `bcryptprimitives.dll!ProcessPrng` | Win8+（Rust 侧口径为 Win10） | `getrandom` 0.3，Rust 1.78 起是 std 的默认 RNG 后端 |
+| `api-ms-win-core-synch-l1-2-0.dll!WaitOnAddress`<br>`!WakeByAddressSingle` / `!WakeByAddressAll` | Win8+ | Rust 1.78 起 std 的 mutex / condvar / rwlock 改为 futex 实现 |
+| `kernel32.dll!GetSystemTimePreciseAsFileTime` | Win8+ | std 取高精度系统时间的路径 |
+
+这些是**静态导入**（不是 `GetProcAddress` 动态取），所以 Win7 上进程停在加载阶段 ——
+不是「功能受限」，是连窗口都出不来。注意 `api-ms-win-core-synch-l1-2-0` 这个文件
+在 Win7 装 KB2999226 后**确实存在**，但里面没有那三个函数（它们是 Win8 的内核等待
+原语，微软 Terminal 项目当年专门为 Win7 写过它们的 shim 才能跑）。
+
+另有两道运行库门槛：
+
+- `api-ms-win-crt-*.dll`（Universal CRT）：Win10 起随系统预装；**Win7/8/8.1 需
+  KB2999226**。
+- `VCRUNTIME140.dll`：需装 VC++ 2015-2022 可再发行组件包。**想彻底去掉这条依赖，
+  可在 `.cargo/config.toml` 里给目标加 `-C target-feature=+crt-static` 改静态链接 CRT。**
+
+### 还有一条比「能否启动」更实际的
+
+TLS 走的是**系统 Schannel**（`native-tls`，导入表里的 `secur32.dll` + `crypt32.dll`）。
+Win7 的 Schannel 默认只开 TLS 1.0/1.1，TLS 1.2 要 KB3140245 加改注册表，**TLS 1.3
+完全不支持**（Win10 1903+ 才有）。2026 年大量站点已硬性要求 TLS 1.2+，所以即便解决了
+启动问题，抓 HTTPS 仍会大面积失败。
+
+### 对照：C# 版
+
+用同一把尺子量了 C# 版（`dist/webclone-cli.exe` / `WebClone-GUI.exe`）：**导入表里一个
+Win8+ 专有符号都没有**，运行库依赖只剩 UCRT（NativeAOT 与自包含发布都静态链接了 CRT，
+所以连 VCRUNTIME140 都不需要）。从导入表看，C# 版的门槛确实比 Rust 版低一档 —— 但
+.NET 8+ 官方同样不支持 Win7，「能加载」不等于「官方支持」，别把导入表干净当兼容性承诺。
+
+### 复验
+
+```bash
+python tests/check_winver.py dist/WebClone-GUI.exe dist/webclone.exe
+```
+
+读 PE 头 + 全量静态导入表 + 延迟加载表，逐符号比对「低版本不存在」清单并给出结论。
+依赖升版本、工具链换代之后跑一遍，就知道门槛有没有动。
 
 ## 与 C# / WPF 版的差异
 
