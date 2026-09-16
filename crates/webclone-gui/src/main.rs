@@ -659,6 +659,11 @@ impl App {
         let wnd = gui::WindowMain::new(gui::WindowMainOpts {
             title: "网页克隆工具 WebClone",
             size: gui::dpi(748, 712),
+            // 窗口类图标。ID 1 是 build.rs 用 rc.exe 嵌进来的 RC_GROUP_ICON
+            // （见 workspace 根 build/embed_icon.rs，与 ICON_ID 必须一致）。
+            // 缺了这行，exe 文件本身有图标，但窗口标题栏和任务栏按钮上还是
+            // 系统默认的空图标 —— 因为图标资源不会自动成为窗口类图标。
+            class_icon: gui::Icon::Id(1),
             style: co::WS::CAPTION
                 | co::WS::SYSMENU
                 | co::WS::CLIPCHILDREN
@@ -908,6 +913,46 @@ impl App {
         // 子类化必须等到这里（控件已在 WM_CREATE 的 before 通道创建完毕）。
         self.subclass_group_boxes();
         self.install_url_enter();
+        self.install_window_icon();
+    }
+
+    /// 给窗口显式设置大/小图标。
+    ///
+    /// `WindowMainOpts::class_icon` 已经把图标注册到**窗口类**上 —— 任务栏、Alt+Tab
+    /// 认应用靠的就是它。但 winsafe 是把**同一个 HICON** 同时填进 `hIcon` 和
+    /// `hIconSm`（见 winsafe `raw_base.rs` 的 `register_class`），而 `LoadIcon`
+    /// 只会加载系统大图标那一层的尺寸，于是标题栏的 16×16 是拿大图缩出来的，
+    /// 边缘会发虚。
+    ///
+    /// 这里按系统度量分别加载两个尺寸，再发 `WM_SETICON` 覆盖掉。附带的好处是
+    /// `WM_GETICON` 从此有返回值 —— 窗口类图标用它是取不到的，只有 `WM_SETICON`
+    /// 设过的才作数（GUI 探针的图标断言就守着这一点）。
+    fn install_window_icon(&self) {
+        // exe 里 RT_GROUP_ICON 的 ID，与 build/embed_icon.rs 的 ICON_ID 一致。
+        const ICON_ID: u16 = 1;
+
+        let Ok(hinst) = w::HINSTANCE::GetModuleHandle(None) else {
+            return;
+        };
+        for (metric, size) in [
+            (co::SM::CXICON, co::ICON_SZ::BIG),
+            (co::SM::CXSMICON, co::ICON_SZ::SMALL),
+        ] {
+            let px = w::GetSystemMetrics(metric);
+            let Ok(mut hicon) = hinst.LoadImageIcon(
+                w::IdOicStr::Id(ICON_ID),
+                w::SIZE::with(px, px),
+                co::LR::DEFAULTCOLOR,
+            ) else {
+                continue;
+            };
+            // 句柄交给窗口后归系统管，别让 guard 在作用域结束时把它销毁。
+            unsafe {
+                self.wnd
+                    .hwnd()
+                    .SendMessage(msg::WmSetIcon { size, hicon: hicon.leak() });
+            }
+        }
     }
 
     /// 启动时把上次的配置回显到界面；首次运行（或配置损坏）就把当前默认值写盘。

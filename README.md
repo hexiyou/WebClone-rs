@@ -16,12 +16,15 @@ C# + WPF 版 `WebClone` 的 **Rust + winsafe** 1:1 复刻。图形界面走 wins
 webclone-rs/
 ├── Cargo.toml                  workspace 定义（共享依赖版本 + release profile）
 ├── build.sh / build.ps1        一键构建脚本（Windows 上优先用 build.ps1，理由见下）
+├── assets/app.ico              程序图标（与 C# 版 WebClone/assets/app.ico 同一份，6 个尺寸）
+├── build/embed_icon.rs         图标嵌入逻辑，被两个 crate 的 build.rs 用 include! 共用
 ├── crates/
 │   ├── webclone-core/          核心引擎（纯 Rust，AOT 友好、零反射）
 │   ├── webclone-cli/           命令行版（bin 名 webclone，与 C# 版同参）
+│   │   └── build.rs            把 app.ico 嵌进 exe
 │   └── webclone-gui/           图形界面（winsafe 原生 Win32）
 │       ├── src/main.rs         窗口、控件、事件、布局
-│       ├── build.rs            把视觉样式 manifest 嵌入 exe（见"界面观感"一节）
+│       ├── build.rs            嵌入 app.ico + 视觉样式 manifest（见"程序图标""界面观感"两节）
 │       └── webclone-gui.manifest   comctl32 v6 依赖声明，决定控件用现代主题还是经典外观
 └── tests/
     ├── make_test_site.py       生成功能验证站点（含 GBK 页面、查询参数资源、CSS 嵌套引用等）
@@ -29,8 +32,10 @@ webclone-rs/
     ├── test_proxy.py           极简 HTTP / SOCKS5 双模代理
     ├── ua_server.py            UA 记录服务器（验证 --user-agent 是否真的生效）
     ├── regression.ps1          CLI 一键回归（6 组场景）
-    ├── gui_probe.py            GUI 界面探针（51 条断言 = 42 首跑 + 9 配置恢复，含截图）
-    └── gui_smoke.sh            GUI 冒烟入口（起进程、跑探针、收尾；自动沙箱隔离）
+    ├── gui_probe.py            GUI 界面探针（59 条断言 = 50 首跑 + 9 配置恢复，含截图）
+    ├── gui_smoke.sh            GUI 冒烟入口（起进程、跑探针、收尾；自动沙箱隔离）
+    ├── pe_resource.py          PE 资源区 / .ico 解析器（零依赖，给 check_icon 用）
+    └── check_icon.py           校验 exe 里的图标与 assets/app.ico 逐字节一致
 ```
 
 `webclone-core` 的模块划分刻意与 C# 版 `WebClone.Core` 一一对应，方便对照阅读：
@@ -203,9 +208,9 @@ GUI 每次启动自动回显上次的选项，配置存放在 **exe 同目录** 
 ### GUI 冒烟验证
 
 `tests\gui_probe.py` 用纯 `ctypes` + PIL 找到窗口、读控件状态、发鼠标/按钮/键盘消息，
-对界面做 **51 条断言**（分两阶段），并顺手截五张图。
+对界面做 **59 条断言**（分两阶段），并顺手截五张图。
 
-**阶段一 · 首次运行（42 条）** —— 配置不存在，全套默认值：
+**阶段一 · 首次运行（50 条）** —— 配置不存在，全套默认值：
 
 - 默认勾选状态是否与 C# 的 XAML 一致、配置回显；
 - 代理框失能、六个数字框的默认值与微调按钮宽度、自定义 UA 勾选联动；
@@ -214,6 +219,9 @@ GUI 每次启动自动回显上次的选项，配置存放在 **exe 同目录** 
   修好前是 20.89%）；
 - **代理端口框随单选启停**：直连时输入框 + 微调两个窗口都必须禁用；
 - **网址框回车**：用 `SendInput` 发真实回车，验证能弹出校验提示；
+- **程序图标**：窗口类图标（`GCLP_HICON` / `GCLP_HICONSM`，任务栏与 Alt+Tab 用）和
+  窗口实例图标（`WM_GETICON`，标题栏用）四个句柄都非空，且 `GetIconInfo` 能证明
+  它们背后真的有彩色位图 —— 只看句柄非 0 会被系统的兜底句柄骗过去；
 - 点关闭按钮能否真的退出进程。
 
 **阶段二 · 配置恢复（9 条）** —— `--restore`，配置里存着非默认值：
@@ -265,6 +273,60 @@ python tests/test_proxy.py socks5 8898
 dist/webclone.exe http://127.0.0.1:8765/ -m full -o out
 ```
 
+## 程序图标
+
+图标与 C# 版用的是**同一份文件**（`assets/app.ico`，6 个尺寸：16 / 32 / 48 / 64 / 128 / 256，
+全是 32bpp PNG 压缩层），两个产物都嵌。
+
+### 资源是怎么进去的
+
+Rust 只生成代码段，`.ico` 要出现在 PE 的资源区必须经链接期的资源编译器。走的是 MSVC
+工具链自带的两件套，**零第三方 crate**（不需要 winres / winresource / embed-resource）：
+
+```
+assets/app.ico --[rc.exe]--> app-icon.res --[link.exe]--> WebClone-GUI.exe (.rsrc)
+```
+
+- `build/embed_icon.rs` 负责全过程：定位 `rc.exe` → 生成临时 `.rc`（内容就一行
+  `1 ICON "<绝对路径>"`）→ 编译成 `.res` → 用 `cargo:rustc-link-arg-bins=<res>` 交给
+  `link.exe`（`link.exe` 直接接受 `.res` 作为输入）；
+- 两个 crate 的 `build.rs` 都用 `include!` 引同一份逻辑，不重复实现；
+- `rc.exe` 一般不在 `PATH` 里（只有 VS 开发者命令提示符会加），所以按
+  `RC` 环境变量 → `PATH` → `Windows Kits\10\bin\<最高版本>\<arch>` → 从 `LIB` 反推
+  的顺序找。找不到只打一条 `cargo:warning` 而不中断编译 —— 没图标总比编不过强；
+- 图标资源与 manifest 会被合并进同一个 `.rsrc` 段，ID 不冲突：图标是
+  `RT_ICON(3)` / `RT_GROUP_ICON(14)`，manifest 是 `RT_MANIFEST(24)`。
+
+### 窗口图标还得单独设
+
+嵌进资源只是第一步 —— 那一步让**资源管理器里的 exe** 有图标。窗口的标题栏和任务栏按钮
+**不会自动**用上它，要再补两处：
+
+1. **窗口类图标** —— `WindowMainOpts::class_icon: gui::Icon::Id(1)`。winsafe 注册窗口类时
+   会把它写进 `WNDCLASSEX.hIcon` / `hIconSm`，任务栏按钮和 Alt+Tab 走这一层；
+2. **窗口实例图标** —— `WM_SETICON`，标题栏走这一层。winsafe 不代劳，在
+   `apply_runtime_init()`（`WM_CREATE` 之后）自己发。
+
+> **为什么两步都要做。** 只做第 1 步会有两个后果：一是 `WM_GETICON` 永远返回 `NULL` ——
+> 这个 API 只认 `WM_SETICON` 设过的图标，取不到类图标；二是标题栏那个 16×16 会发虚 ——
+> winsafe 的 `register_class`（源码 `gui/windows/raw_base.rs`）把**同一个 HICON** 同时填给
+> `hIcon` 和 `hIconSm`，而 `LoadIcon` 只会加载系统大图标尺寸那一层，小图标是缩出来的。
+> 所以第 2 步要按 `GetSystemMetrics(SM_CXICON / SM_CXSMICON)` 分别加载正确尺寸再覆盖。
+
+### 验证
+
+```bash
+python tests/check_icon.py            # 不带参数则校验 dist\ 下的两个产物
+```
+
+`tests/pe_resource.py` 是个零依赖的 PE 资源区解析器；`check_icon.py` 用它把 exe 里的
+`RT_GROUP_ICON` / `RT_ICON` 拆出来，与 `assets/app.ico` **逐字节比对**（不是"能打开就行"）：
+图层数量、各图层尺寸、每个图层的字节全都要对上。窗口侧由 GUI 探针的 8 条断言覆盖
+（见"GUI 冒烟验证"一节里的"程序图标"一条）。
+
+> 体积代价 **+25,088 字节**（3,579,392 → 3,604,480），基本就是 ico 本体 23,976 字节
+> 加上资源目录的开销。
+
 ## 界面观感与原生控件主题
 
 原生 Win32 程序的外观**不由代码决定，而由 exe 里那份 manifest 决定**。Rust 的 MSVC
@@ -280,7 +342,7 @@ C# WPF 版不存在这个问题，因为 WPF 的控件全是自绘的，一个�
 不需要 winres / embed-resource 那类 crate）：
 
 - 体积代价 **+1.5 KB**（3,576,832 → 3,578,368 字节），业务代码 **0 改动**；
-  （后续修掉下面几个 Win32 坑又加了约 1.5 KB，当前产物 3,579,904 字节）
+  （后续修掉下面几个 Win32 坑又加了约 1 KB，再嵌图标 +25 KB，当前产物 3,604,480 字节）
 - 未产生外部 `.manifest` 文件（`/MANIFEST:EMBED` 保证内嵌）；
 - 效果：按钮、复选框、单选钮、页签、滚动条全部切换为 Windows 10/11 原生主题。
 

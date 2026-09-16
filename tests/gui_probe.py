@@ -34,6 +34,11 @@ BM_CLICK = 0x00F5
 BM_GETCHECK = 0x00F0
 WM_GETTEXT = 0x000D
 WM_GETTEXTLENGTH = 0x000E
+WM_GETICON = 0x007F
+ICON_SMALL = 0
+ICON_BIG = 1
+GCLP_HICON = -14
+GCLP_HICONSM = -34
 SYNCHRONIZE = 0x00100000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WAIT_OBJECT_0 = 0
@@ -464,6 +469,53 @@ def main():
             time.sleep(0.5)
     else:
         check("找到网址输入框", False)
+
+    # ---------- 断言 7：窗口图标（标题栏 / 任务栏）----------
+    # 图标是编译期嵌进 PE 资源区的（见 build/embed_icon.rs），代码里没有可断言的
+    # 运行态，只能问系统。分两层，缺一不可：
+    #   · 窗口**类**图标 GCLP_HICON / GCLP_HICONSM —— 任务栏按钮、Alt+Tab 走这层，
+    #     由 WindowMainOpts::class_icon 注册；
+    #   · 窗口**实例**图标 WM_GETICON —— 标题栏走这层，只能靠 WM_SETICON 设，
+    #     winsafe 不代劳（见 main.rs 的 install_window_icon）。
+    # 只判句柄非 0 还不够（失败时系统可能给兜底句柄），所以再用 GetIconInfo 确认
+    # 它背后真的有一张彩色位图。
+    class ICONINFO(ctypes.Structure):
+        _fields_ = [
+            ("fIcon", wt.BOOL),
+            ("xHotspot", wt.DWORD),
+            ("yHotspot", wt.DWORD),
+            ("hbmMask", ctypes.c_void_p),
+            ("hbmColor", ctypes.c_void_p),
+        ]
+
+    # SendMessageW 的默认 restype 是 32 位 int，HICON 会被截断。但不能给整个脚本
+    # 统一改成 c_void_p：WM_GETTEXTLENGTH 返回的 0 会变成 None，children() 里
+    # 拿它做 `n + 1` 就崩。所以这里单独包一个指针返回的入口。
+    send_msg_ptr = ctypes.WINFUNCTYPE(
+        ctypes.c_void_p, wt.HWND, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
+    )(("SendMessageW", u32))
+    u32.GetClassLongPtrW.restype = ctypes.c_void_p
+    u32.GetClassLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
+    u32.GetIconInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(ICONINFO)]
+    u32.GetIconInfo.restype = wt.BOOL
+    gdi32 = ctypes.windll.gdi32
+    gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
+
+    for label, hicon in [
+        ("窗口类大图标", u32.GetClassLongPtrW(hwnd, GCLP_HICON)),
+        ("窗口类小图标", u32.GetClassLongPtrW(hwnd, GCLP_HICONSM)),
+        ("窗口大图标", send_msg_ptr(hwnd, WM_GETICON, ICON_BIG, None)),
+        ("窗口小图标", send_msg_ptr(hwnd, WM_GETICON, ICON_SMALL, None)),
+    ]:
+        check(f"{label}句柄非空", bool(hicon))
+        if not hicon:
+            continue
+        info = ICONINFO()
+        got = u32.GetIconInfo(hicon, ctypes.byref(info))
+        check(f"{label}背后确实有位图（GetIconInfo）", bool(got) and bool(info.hbmColor))
+        for hbm in (info.hbmMask, info.hbmColor):
+            if hbm:
+                gdi32.DeleteObject(hbm)
 
     # ---------- 断言 4：点关闭按钮必须真的退出进程 ----------
     # 「点 X 没反应、只能强杀」这个 bug 就是这条断言要守的。winsafe 的 on() 通道
