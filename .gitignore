@@ -6,6 +6,7 @@
 
 # 冒烟测试留下的临时文件
 gui-smoke.log
+gui-smoke-restore.log
 shot-*.png
 tests/.smoke-sandbox/
 tests/_regress/

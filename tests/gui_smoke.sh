@@ -15,9 +15,14 @@
 #   PYTHON=/path/to/python.exe . tests/gui_smoke.sh
 #   用 `.` 在当前 shell 里执行，避免嵌套 bash 落到 WSL 上。
 #
-# 断言项：默认勾选状态、配置回显、代理框失能、数字框默认值与宽度、自定义 UA 勾选
-# 联动、关于页渲染、切页重绘（像素级比对，防重影）、代理端口框随单选启停、网址框
-# 回车（真实按键）、点关闭按钮能真退出，共 42 条；全过时退出码 0。
+# 断言项分两个阶段：
+#  阶段一（gui_probe.py，42 条）：默认勾选状态、配置回显、代理框失能、数字框默认值与
+#    宽度、自定义 UA 勾选联动、关于页渲染、切页重绘（像素级比对，防重影）、代理端口框
+#    随单选启停、网址框回车（真实按键）、点关闭按钮能真退出。
+#  阶段二（gui_probe.py --restore，9 条）：配置恢复路径 —— 把沙箱配置改成
+#    SOCKS5 + 整站后重启，验证两组单选各只有一项选中、代理输入框跟着启用。
+#    防的是单选回填"两个同时选中"（程序化 BM_SETCHECK 不清同组兄弟）。
+# 两个阶段全过时退出码 0。
 
 set -u
 
@@ -73,4 +78,48 @@ echo "probe rc=$PROBE_RC"
 [ -f "$SANDBOX/webclone-gui.json" ] && echo "cfg 已落盘(沙箱): yes" || echo "cfg 已落盘(沙箱): no"
 echo "--- 断言 ---"
 grep -E "^\[(PASS|FAIL)\]|^RESULT|^shot |^pid=|tab strip|Traceback" "$LOG"
-exit "$PROBE_RC"
+
+# ---------- 阶段二：配置文件恢复路径 ----------
+# 阶段一的 42 条只覆盖"首次运行"（无配置 → 全套默认值）。而"配置里存着非默认值
+# → 回填控件"是另一条独立路径，单选按钮的回填有专门的坑：程序化 BM_SETCHECK
+# 不会像真实点击那样取消同组兄弟，会留下"直连 + SOCKS5 同时选中"。
+# 所以这里做一次真实往返：把沙箱配置改成 SOCKS5 + 整站，重启进程，验回填结果。
+LOG2="$ROOT_WIN/gui-smoke-restore.log"
+RC2=1
+if [ -f "$SANDBOX/webclone-gui.json" ]; then
+    "$PY" - "$SANDBOX/webclone-gui.json" <<'PYEOF'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    cfg = json.load(handle)
+cfg["Mode"] = "full"
+cfg["ProxyKind"] = "socks5"
+cfg["ProxyHost"] = "127.0.0.1"
+cfg["ProxyPort"] = 58591
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(cfg, handle, ensure_ascii=False, indent=2)
+print("已把沙箱配置改成 Mode=full / ProxyKind=socks5 / 127.0.0.1:58591")
+PYEOF
+
+    "./$SANDBOX/WebClone-GUI.exe" &
+    GUI2=$!
+    sleep 3
+    "$PY" tests/gui_probe.py --restore > "$LOG2" 2>&1
+    RC2=$?
+    if kill -0 "$GUI2" 2>/dev/null; then
+        echo "阶段二关闭验证: 进程仍在运行 [X]（手动清理）"
+        kill "$GUI2" 2>/dev/null
+    else
+        echo "阶段二关闭验证: 进程已自行退出 [OK]"
+    fi
+    echo "--- 阶段二断言（配置恢复）---"
+    grep -E "^\[(PASS|FAIL)\]|^RESULT|^shot |^  |Traceback" "$LOG2"
+    echo "restore rc=$RC2"
+else
+    echo "跳过阶段二: 沙箱配置不存在"
+fi
+
+[ "$PROBE_RC" = "0" ] && [ "$RC2" = "0" ] && exit 0
+exit 1

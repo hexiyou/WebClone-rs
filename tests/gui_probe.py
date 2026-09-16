@@ -496,5 +496,103 @@ def main():
     return 0
 
 
+# ------------------------------------------------- 阶段二：配置文件恢复路径
+# 前 42 条断言只覆盖"首次运行"（配置不存在 → 全套默认值）这一条路径，
+# 从没测过"配置文件里存着非默认值"→ 回填界面。而单选按钮的回填正是 Win32 老坑：
+# 程序化 `BM_SETCHECK` 不会像真实点击那样取消同组兄弟（互斥是 BS_AUTORADIOBUTTON
+# 在响应用户点击时才做的），所以回填很容易变成"两个同时选中"。
+#
+# 当时的写法 `proxy[2].select(true)` 就留下了「直连 + SOCKS5」双选中。更阴的是
+# winsafe 的 `RadioGroup::selected_index()` 实现是 `position(|r| r.is_selected())`，
+# 返回**第一个**被选中的 → 界面显示 SOCKS5、实际走直连、关窗回写还把配置
+# 静默改成 none。所以这里必须同时断言"恰好一个选中"和"是配置里那个"。
+#
+# 依赖：由 tests/gui_smoke.sh 在启动前把沙箱配置改成
+#       Mode=full、ProxyKind=socks5、ProxyHost=127.0.0.1、ProxyPort=58591。
+SEED_PORT = "58591"
+SEED_HOST = "127.0.0.1"
+
+
+def restore_main():
+    hwnd = find_window()
+    if not hwnd:
+        print("FAIL: window not found（阶段二需要 GUI 已启动）")
+        return 1
+    print(f"window hwnd={hwnd}（阶段二：配置文件恢复）")
+
+    u32.SetWindowPos(hwnd, None, 40, 40, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    time.sleep(0.4)
+
+    kids = children(hwnd)
+    ok = True
+
+    def check(label, cond):
+        nonlocal ok
+        ok = ok and cond
+        print(f"[{'PASS' if cond else 'FAIL'}] {label}")
+
+    groups = [
+        (
+            "克隆模式",
+            [
+                ("单页模板（只抓当前页与其引用的资源）", "单页模板"),
+                ("整站（递归追踪站内链接）", "整站"),
+            ],
+            "整站",
+        ),
+        (
+            "网络代理",
+            [("直连", "直连"), ("HTTP", "HTTP"), ("SOCKS5", "SOCKS5")],
+            "SOCKS5",
+        ),
+    ]
+
+    for group, members, want in groups:
+        states = {}
+        for text, short in members:
+            btn = find_exact(kids, "Button", text)
+            states[short] = None if btn is None else btn["checked"]
+        checked = [short for short, v in states.items() if v == 1]
+        print(f"  {group} 选中态: {states}")
+        check(f"{group} 组恰好一个被选中（实际 {len(checked)} 个：{checked}）", len(checked) == 1)
+        check(f"{group} 组恢复成配置文件里的「{want}」", checked == [want])
+
+    # 代理输入框必须跟着恢复出来的 SOCKS5 一起启用。
+    # 如果 selected_index() 取错成"直连"，这里会全灰 —— 那正是"界面选了 SOCKS5
+    # 却禁用代理框"的观感。
+    port_edit = find_exact(kids, "Edit", SEED_PORT)
+    host_edit = find_exact(kids, "Edit", SEED_HOST)
+    check(f"代理地址框已回显 {SEED_HOST}", host_edit is not None)
+    check(f"端口框已回显 {SEED_PORT}", port_edit is not None)
+    check("恢复 SOCKS5 后代理地址框启用=True", bool(host_edit and host_edit["enabled"]))
+    check("恢复 SOCKS5 后端口输入框启用=True", bool(port_edit and port_edit["enabled"]))
+
+    port_spin = None
+    if port_edit:
+        port_spin = next(
+            (
+                k
+                for k in kids
+                if k["cls"] == "msctls_updown32"
+                and abs(k["rect"][1] - port_edit["rect"][1]) < 3
+            ),
+            None,
+        )
+    check("恢复 SOCKS5 后端口微调启用=True", bool(port_spin and port_spin["enabled"]))
+
+    shot(hwnd, "shot-5-restore.png")
+
+    # 收尾：跟阶段一一样发 WM_CLOSE，让进程自己退出（顺带证明行不行得通）。
+    # 这里只打印结果、不计入断言 —— 关窗语义归阶段一那两条管。
+    u32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+    time.sleep(1.5)
+    print(f"阶段二关闭验证: {'进程已自行退出 [OK]' if not u32.IsWindow(hwnd) else '窗口仍在 [X]'}")
+
+    print("RESULT:", "ALL PASS" if ok else "HAS FAILURES")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
+    if "--restore" in sys.argv[1:]:
+        sys.exit(restore_main())
     sys.exit(main())

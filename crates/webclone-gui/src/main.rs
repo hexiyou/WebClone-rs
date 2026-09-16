@@ -619,6 +619,22 @@ fn group_box(
     )
 }
 
+/// 程序化选中单选项：把同组其它项**显式**关掉。
+///
+/// 必须这么做的原因（winsafe 0.0.29 实测）：
+///   * `RadioButton::select(b)` 就是裸的 `BM_SETCHECK`，**不会**像真实点击那样
+///     自动取消同组兄弟 —— 互斥是 `BS_AUTORADIOBUTTON` 在响应用户点击时才做的；
+///   * 而 `RadioGroup::selected_index()` 实现是 `position(|r| r.is_selected())`，
+///     返回**第一个**被选中的，两个同时选中时它认得的是序号小的那个。
+/// 两者一叠加，`widget[2].select(true)` 就会留下"直连 + SOCKS5 同时选中"，
+/// 而且读取方一律拿到序号最小的（直连 / 单页模板）→ 界面显示 SOCKS5、
+/// 实际走直连、配置回写还被静默改成 `none`。所以程序化设置一律走这个函数。
+fn select_radio_only(group: &gui::RadioGroup, index: usize) {
+    for (i, radio) in group.iter().enumerate() {
+        radio.select(i == index);
+    }
+}
+
 // ------------------------------------------------------------ 应用主体
 
 #[derive(Default)]
@@ -922,20 +938,30 @@ impl App {
             let _ = self.ui.output.set_text(s.output_directory.trim());
         }
 
-        if s.mode.eq_ignore_ascii_case("full") {
-            self.ui.mode[1].select(true);
-        } else {
-            self.ui.mode[0].select(true);
-        }
+        // 克隆模式：必须用 select_radio_only，不能写 `mode[1].select(true)`。
+        // "单页模板"构造时就带 selected:true，直接 select 会留下两个单选同时选中；
+        // 而 selected_index() 取第一个 → 界面勾着"整站"、实际按"单页"跑，配置回写
+        // 还会被改成 single。代理那组同理（见下面）。
+        select_radio_only(
+            &self.ui.mode,
+            if s.mode.eq_ignore_ascii_case("full") {
+                1
+            } else {
+                0
+            },
+        );
 
         self.ui.depth.set_pos(s.max_depth);
         self.ui.max_pages.set_pos(s.max_pages);
 
-        match s.proxy_kind.to_lowercase().as_str() {
-            "http" => self.ui.proxy[1].select(true),
-            "socks5" => self.ui.proxy[2].select(true),
-            _ => self.ui.proxy[0].select(true),
-        }
+        select_radio_only(
+            &self.ui.proxy,
+            match s.proxy_kind.to_lowercase().as_str() {
+                "http" => 1,
+                "socks5" => 2,
+                _ => 0,
+            },
+        );
         let _ = self.ui.proxy_host.set_text(&s.proxy_host);
         self.ui.proxy_port.set_pos(s.proxy_port);
         let _ = self.ui.proxy_user.set_text(&s.proxy_user_name);
